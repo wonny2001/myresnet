@@ -14,7 +14,7 @@ mnist = input_data.read_data_sets("MNIST_tw/", one_hot=True, validation_size=100
 
 # hyper parameters
 learning_rate = 0.001
-training_epochs = 1500
+training_epochs = 150
 batch_size = 100
 
 #28x28 -> 24x24
@@ -33,17 +33,33 @@ class Model:
         self.name = name
         self._build_net()
 
+    def sameWHD(self, laststep, currentFilter, nCycle, lv):
+        for i in range(nCycle):
+            # layer2
+            with tf.variable_scope('Level'+ str(lv) +'conv_blocks_%d' % (i + 1), reuse=False):
+                # with tf.variable_scope('block1', reuse=False):
+                bn1 = tf.layers.batch_normalization(laststep, name="bn1")
+                conv1 = tf.layers.conv2d(inputs=bn1, filters=currentFilter, kernel_size=[3, 3],
+                                         padding="SAME", activation=tf.nn.relu, name="conv_block1")
+                # with tf.variable_scope('block1', reuse=False):
+                bn2 = tf.layers.batch_normalization(conv1, name="bn2")
+                conv2 = tf.layers.conv2d(inputs=bn2, filters=currentFilter, kernel_size=[3, 3],
+                                         padding="SAME", activation=tf.nn.relu, name="conv_block2")
+                laststep = laststep + conv2
+
+        return laststep
+
     def modifyWHD(self, laststep, currentfilter, lv):
         with tf.variable_scope('Mid'+ str(lv) +'decrease_conv_wh_increase_depth'):
             # decrease wh, wh by stride 2
             bn1 = tf.layers.batch_normalization(laststep, name="bn1")
             conv1 = tf.layers.conv2d(inputs=bn1, filters=currentfilter*2, kernel_size=[3, 3], strides=2,
-                                     padding="SAME", activation=tf.nn.relu, name="block1")
+                                     padding="SAME", activation=tf.nn.relu, name="conv_block1")
 
             # with tf.variable_scope('block1', reuse=False):
             bn2 = tf.layers.batch_normalization(conv1, name="bn2")
             conv2 = tf.layers.conv2d(inputs=bn2, filters=currentfilter*2, kernel_size=[3, 3],
-                                     padding="SAME", activation=tf.nn.relu, name="block2")
+                                     padding="SAME", activation=tf.nn.relu, name="conv_block2")
 
             # laststep should be changed to (128,half,half,double)
             pooled_input = tf.nn.avg_pool(laststep, ksize=[1, 2, 2, 1],
@@ -53,21 +69,25 @@ class Model:
             laststep = padded_input + conv2
         return laststep
 
-    def sameWHD(self, laststep, currentFilter, nCycle, lv):
-        for i in range(nCycle):
-            # layer2
-            with tf.variable_scope('Level'+ str(lv) +'conv_blocks_%d' % (i + 2), reuse=False):
-                # with tf.variable_scope('block1', reuse=False):
-                bn1 = tf.layers.batch_normalization(laststep, name="bn1")
-                conv1 = tf.layers.conv2d(inputs=bn1, filters=currentFilter, kernel_size=[3, 3],
-                                         padding="SAME", activation=tf.nn.relu, name="block1")
-                # with tf.variable_scope('block1', reuse=False):
-                bn2 = tf.layers.batch_normalization(conv1, name="bn2")
-                conv2 = tf.layers.conv2d(inputs=bn2, filters=currentFilter, kernel_size=[3, 3],
-                                         padding="SAME", activation=tf.nn.relu, name="block2")
-                laststep = laststep + conv2
+    def lastLevel(self, laststep, currentFilter):
+        with tf.variable_scope("Level_Last"):
+            bn_com = tf.layers.batch_normalization(laststep)
 
-        return laststep
+            # Convolutional Layer #2 and Pooling Layer #2
+            conv_com = tf.layers.conv2d(inputs=bn_com, filters=currentFilter, kernel_size=[3, 3], strides=[4, 4],
+                                        padding="same", activation=tf.nn.relu)
+            pool_com = tf.layers.max_pooling2d(inputs=conv_com, pool_size=[2, 2],
+                                               padding="same", strides=2)
+
+            # Dense Layer with Relu
+            flat = tf.reshape(pool_com, [-1, 128 * 1 * 1])
+            dense4 = tf.layers.dense(inputs=flat,
+                                     units=625, activation=tf.nn.relu)
+            dropout4 = tf.layers.dropout(inputs=dense4,
+                                         rate=0.5, training=self.training)
+
+            # Logits (no activation) Layer: L5 Final FC 625 inputs -> 10 outputs
+            self.logits = tf.layers.dense(inputs=dropout4, units=10)
 
     def _build_net(self):
         with tf.variable_scope(self.name):
@@ -81,46 +101,22 @@ class Model:
             # img 28x28x1 (black/white), Input Layer
             X_img = tf.reshape(self.X, [-1, WH, WH, 1])
             self.Y = tf.placeholder(tf.float32, [None, 10])
-            conv0 = tf.layers.conv2d(inputs=X_img, filters=32, kernel_size=[3, 3],
+            conv0 = tf.layers.conv2d(inputs=X_img, filters=4, kernel_size=[3, 3],
                                      padding="SAME", activation=tf.nn.relu)
-            #layer1
-            with tf.variable_scope("conv_blocks_1"):
+            laststep = conv0
 
-                bn1_1 = tf.layers.batch_normalization(conv0)
-                conv1_1 = tf.layers.conv2d(inputs=bn1_1, filters=32, kernel_size=[3, 3],
-                                         padding="SAME", activation=tf.nn.relu)
-                bn1_2 = tf.layers.batch_normalization(conv1_1)
-                conv1_2 = tf.layers.conv2d(inputs=bn1_2, filters=32, kernel_size=[3, 3],
-                                         padding="SAME", activation=tf.nn.relu)
-
-            laststep = conv0 + conv1_2
-
-            laststep = self.sameWHD(laststep, currentFilter=32, nCycle=5, lv=1)
-            laststep = self.modifyWHD(laststep, currentfilter=32, lv=1)
-            laststep = self.sameWHD(laststep, currentFilter=64, nCycle=3, lv=2)
-            laststep = self.modifyWHD(laststep, currentfilter=64, lv=2)
-            laststep = self.sameWHD(laststep, currentFilter=128, nCycle=3, lv=3)
-
-            with tf.variable_scope("conv_combine"):
-                bn_com = tf.layers.batch_normalization(laststep)
-
-                # Convolutional Layer #2 and Pooling Layer #2
-                conv_com = tf.layers.conv2d(inputs=bn_com, filters=128, kernel_size=[3, 3],strides=[4,4],
-                                         padding="same", activation=tf.nn.relu)
-                pool_com = tf.layers.max_pooling2d(inputs=conv_com, pool_size=[2, 2],
-                                                padding="same", strides=2)
-
-            with tf.variable_scope("Last_Lv"):
-
-                # Dense Layer with Relu
-                flat = tf.reshape(pool_com, [-1, 128 * 1 * 1])
-                dense4 = tf.layers.dense(inputs=flat,
-                                         units=625, activation=tf.nn.relu)
-                dropout4 = tf.layers.dropout(inputs=dense4,
-                                             rate=0.5, training=self.training)
-
-                # Logits (no activation) Layer: L5 Final FC 625 inputs -> 10 outputs
-                self.logits = tf.layers.dense(inputs=dropout4, units=10)
+            laststep = self.sameWHD(laststep, currentFilter=4, nCycle=5, lv=0)
+            laststep = self.modifyWHD(laststep, currentfilter=4, lv=0)
+            laststep = self.sameWHD(laststep, currentFilter=8, nCycle=5, lv=1)
+            laststep = self.modifyWHD(laststep, currentfilter=8, lv=1)
+            laststep = self.sameWHD(laststep, currentFilter=16, nCycle=3, lv=2)
+            laststep = self.modifyWHD(laststep, currentfilter=16, lv=2)
+            laststep = self.sameWHD(laststep, currentFilter=32, nCycle=3, lv=3)
+            laststep = self.modifyWHD(laststep, currentfilter=32, lv=3)
+            laststep = self.sameWHD(laststep, currentFilter=64, nCycle=3, lv=4)
+            laststep = self.modifyWHD(laststep, currentfilter=64, lv=4)
+            laststep = self.sameWHD(laststep, currentFilter=128, nCycle=3, lv=5)
+            self.lastLevel(laststep, currentFilter=128)
 
             print('1 cycle complete')
 
