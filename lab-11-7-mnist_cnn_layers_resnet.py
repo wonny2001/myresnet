@@ -14,7 +14,7 @@ mnist = input_data.read_data_sets("MNIST_tw/", one_hot=True, validation_size=100
 
 # hyper parameters
 learning_rate = 0.001
-training_epochs = 15000
+training_epochs = 1500
 batch_size = 100
 
 #28x28 -> 24x24
@@ -33,6 +33,42 @@ class Model:
         self.name = name
         self._build_net()
 
+    def modifyWHD(self, laststep, currentfilter, lv):
+        with tf.variable_scope('Mid'+ str(lv) +'decrease_conv_wh_increase_depth'):
+            # decrease wh, wh by stride 2
+            bn1 = tf.layers.batch_normalization(laststep, name="bn1")
+            conv1 = tf.layers.conv2d(inputs=bn1, filters=currentfilter*2, kernel_size=[3, 3], strides=2,
+                                     padding="SAME", activation=tf.nn.relu, name="block1")
+
+            # with tf.variable_scope('block1', reuse=False):
+            bn2 = tf.layers.batch_normalization(conv1, name="bn2")
+            conv2 = tf.layers.conv2d(inputs=bn2, filters=currentfilter*2, kernel_size=[3, 3],
+                                     padding="SAME", activation=tf.nn.relu, name="block2")
+
+            # laststep should be changed to (128,half,half,double)
+            pooled_input = tf.nn.avg_pool(laststep, ksize=[1, 2, 2, 1],
+                                          strides=[1, 2, 2, 1], padding='VALID')
+            padded_input = tf.pad(pooled_input, [[0, 0], [0, 0], [0, 0], [currentfilter // 2, currentfilter // 2]])
+
+            laststep = padded_input + conv2
+        return laststep
+
+    def sameWHD(self, laststep, currentFilter, nCycle, lv):
+        for i in range(nCycle):
+            # layer2
+            with tf.variable_scope('Level'+ str(lv) +'conv_blocks_%d' % (i + 2), reuse=False):
+                # with tf.variable_scope('block1', reuse=False):
+                bn1 = tf.layers.batch_normalization(laststep, name="bn1")
+                conv1 = tf.layers.conv2d(inputs=bn1, filters=currentFilter, kernel_size=[3, 3],
+                                         padding="SAME", activation=tf.nn.relu, name="block1")
+                # with tf.variable_scope('block1', reuse=False):
+                bn2 = tf.layers.batch_normalization(conv1, name="bn2")
+                conv2 = tf.layers.conv2d(inputs=bn2, filters=currentFilter, kernel_size=[3, 3],
+                                         padding="SAME", activation=tf.nn.relu, name="block2")
+                laststep = laststep + conv2
+
+        return laststep
+
     def _build_net(self):
         with tf.variable_scope(self.name):
             # dropout (keep_prob) rate  0.7~0.5 on training, but should be 1
@@ -47,7 +83,7 @@ class Model:
             self.Y = tf.placeholder(tf.float32, [None, 10])
             conv0 = tf.layers.conv2d(inputs=X_img, filters=32, kernel_size=[3, 3],
                                      padding="SAME", activation=tf.nn.relu)
-#layer1
+            #layer1
             with tf.variable_scope("conv_blocks_1"):
 
                 bn1_1 = tf.layers.batch_normalization(conv0)
@@ -57,71 +93,16 @@ class Model:
                 conv1_2 = tf.layers.conv2d(inputs=bn1_2, filters=32, kernel_size=[3, 3],
                                          padding="SAME", activation=tf.nn.relu)
 
-            last2step = conv0
-            justbefore = conv1_2
-            for i in range(100):
-                # layer2
-                with tf.variable_scope('conv_blocks_%d' % (i + 2), reuse=False):
-                    # with tf.variable_scope('block1', reuse=False):
-                    last2step = last2step + justbefore
-                    bn1 = tf.layers.batch_normalization(last2step, name = "bn1")
-                    conv1 = tf.layers.conv2d(inputs=bn1, filters=32, kernel_size=[3, 3],
-                                               padding="SAME", activation=tf.nn.relu, name = "block1")
-                    # with tf.variable_scope('block1', reuse=False):
-                    bn2 = tf.layers.batch_normalization(conv1, name = "bn2")
-                    conv2 = tf.layers.conv2d(inputs=bn2, filters=32, kernel_size=[3, 3],
-                                               padding="SAME", activation=tf.nn.relu, name = "block2")
-                    justbefore  = conv2
+            laststep = conv0 + conv1_2
 
-
-
-# #layer2
-#             with tf.variable_scope("conv2_1"):
-#                 combine = conv0 + conv1_2
-#                 bn2_1 = tf.layers.batch_normalization(combine)
-#                 conv2_1 = tf.layers.conv2d(inputs=bn2_1, filters=32, kernel_size=[3, 3],
-#                                          padding="SAME", activation=tf.nn.relu)
-#             with tf.variable_scope("conv2_2"):
-#                 bn2_2 = tf.layers.batch_normalization(conv2_1)
-#                 conv2_2 = tf.layers.conv2d(inputs=bn2_2, filters=32, kernel_size=[3, 3],
-#                                          padding="SAME", activation=tf.nn.relu)
-#
-# # layer3
-#             with tf.variable_scope("conv3_1"):
-#                 combine = combine + conv2_2
-#                 bn3_1 = tf.layers.batch_normalization(combine)
-#                 conv3_1 = tf.layers.conv2d(inputs=bn3_1, filters=32, kernel_size=[3, 3],
-#                                            padding="SAME", activation=tf.nn.relu)
-#             with tf.variable_scope("conv3_2"):
-#                 bn3_2 = tf.layers.batch_normalization(conv3_1)
-#                 conv3_2 = tf.layers.conv2d(inputs=bn3_2, filters=32, kernel_size=[3, 3],
-#                                            padding="SAME", activation=tf.nn.relu)
-
-            # # layer4
-            # with tf.variable_scope("conv4_1"):
-            #     combine = combine + conv3_2
-            #     bn4_1 = tf.layers.batch_normalization(combine)
-            #     conv4_1 = tf.layers.conv2d(inputs=bn4_1, filters=32, kernel_size=[3, 3],
-            #                                padding="SAME", activation=tf.nn.relu)
-            # with tf.variable_scope("conv4_2"):
-            #     bn4_2 = tf.layers.batch_normalization(conv4_1)
-            #     conv4_2 = tf.layers.conv2d(inputs=bn4_2, filters=32, kernel_size=[3, 3],
-            #                                padding="SAME", activation=tf.nn.relu)
-            #
-            #
-            # # layer5
-            # with tf.variable_scope("conv5_1"):
-            #     combine = combine + conv4_2
-            #     bn5_1 = tf.layers.batch_normalization(combine)
-            #     conv5_1 = tf.layers.conv2d(inputs=bn5_1, filters=32, kernel_size=[3, 3],
-            #                                padding="SAME", activation=tf.nn.relu)
-            # with tf.variable_scope("conv5_2"):
-            #     bn5_2 = tf.layers.batch_normalization(conv5_1)
-            #     conv5_2 = tf.layers.conv2d(inputs=bn5_2, filters=32, kernel_size=[3, 3],
-            #                                padding="SAME", activation=tf.nn.relu)
+            laststep = self.sameWHD(laststep, currentFilter=32, nCycle=5, lv=1)
+            laststep = self.modifyWHD(laststep, currentfilter=32, lv=1)
+            laststep = self.sameWHD(laststep, currentFilter=64, nCycle=3, lv=2)
+            laststep = self.modifyWHD(laststep, currentfilter=64, lv=2)
+            laststep = self.sameWHD(laststep, currentFilter=128, nCycle=3, lv=3)
 
             with tf.variable_scope("conv_combine"):
-                bn_com = tf.layers.batch_normalization(justbefore)
+                bn_com = tf.layers.batch_normalization(laststep)
 
                 # Convolutional Layer #2 and Pooling Layer #2
                 conv_com = tf.layers.conv2d(inputs=bn_com, filters=128, kernel_size=[3, 3],strides=[4,4],
@@ -132,7 +113,7 @@ class Model:
             with tf.variable_scope("Last_Lv"):
 
                 # Dense Layer with Relu
-                flat = tf.reshape(pool_com, [-1, 128 * FOURTH_WH * FOURTH_WH])
+                flat = tf.reshape(pool_com, [-1, 128 * 1 * 1])
                 dense4 = tf.layers.dense(inputs=flat,
                                          units=625, activation=tf.nn.relu)
                 dropout4 = tf.layers.dropout(inputs=dense4,
