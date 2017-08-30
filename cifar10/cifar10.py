@@ -184,6 +184,59 @@ def inputs(eval_data):
     labels = tf.cast(labels, tf.float16)
   return images, labels
 
+def sameWHD(laststep, currentfilter, nCycle, lv):
+    for i in range(nCycle):
+        # layer2
+        with tf.variable_scope('Level' + str(lv) + 'conv_blocks_%d' % (i + 1), reuse=None):
+            norm1 = tf.nn.lrn(laststep, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+            kernel1 = _variable_with_weight_decay('weights1_in_' + str(i),
+                                                  shape=[5, 5, currentfilter, currentfilter],
+                                                  # [filter_height, filter_width, in_channels, out_channels]
+                                                  stddev=5e-5,
+                                                  wd=0.0)
+
+            conv1 = tf.nn.conv2d(norm1, kernel1, [1, 1, 1, 1], padding='SAME')
+            norm2 = tf.nn.lrn(conv1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+            kernel2 = _variable_with_weight_decay('weights2_in_' + str(i),
+                                                  shape=[5, 5, currentfilter, currentfilter],
+                                                  # [filter_height, filter_width, in_channels, out_channels]
+                                                  stddev=5e-5,
+                                                  wd=0.0)
+            conv2 = tf.nn.conv2d(norm2, kernel2, [1, 1, 1, 1], padding='SAME')
+            laststep = laststep + conv2
+    return laststep
+
+
+def modifyWHD(laststep, currentfilter, lv):
+    with tf.variable_scope('Mid' + str(lv) + 'decrease_conv_wh_increase_depth'):
+        norm1 = tf.nn.lrn(laststep, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+        kernel1 = _variable_with_weight_decay('weights1_in_' + str(1),
+                                              shape=[5, 5, currentfilter, currentfilter * 2],
+                                              # [filter_height, filter_width, in_channels, out_channels]
+                                              stddev=5e-5,
+                                              wd=0.0)
+
+        conv1 = tf.nn.conv2d(norm1, kernel1, [1, 2, 2, 1], padding='SAME')
+        norm2 = tf.nn.lrn(conv1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75)
+        kernel2 = _variable_with_weight_decay('weights2_in_' + str(1),
+                                              shape=[5, 5, currentfilter * 2, currentfilter * 2],
+                                              # [filter_height, filter_width, in_channels, out_channels]
+                                              stddev=5e-5,
+                                              wd=0.0)
+        conv2 = tf.nn.conv2d(norm2, kernel2, [1, 1, 1, 1], padding='SAME')
+
+        pooled_input = tf.nn.avg_pool(laststep, ksize=[1, 2, 2, 1],
+                                      strides=[1, 2, 2, 1], padding='VALID')
+        padded_input = tf.pad(pooled_input, [[0, 0], [0, 0], [0, 0], [currentfilter // 2, currentfilter // 2]])
+
+        laststep = padded_input + conv2
+
+        laststep = laststep + conv2
+
+    return laststep
+
+
+
 
 def inference(images):
   """Build the CIFAR-10 model.
@@ -200,32 +253,38 @@ def inference(images):
   # by replacing all instances of tf.get_variable() with tf.Variable().
   #
   # conv1
-  with tf.variable_scope('conv1') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 3, 64],
-                                         stddev=5e-2,
-                                         wd=0.0)
-    conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0))
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv1 = tf.nn.relu(pre_activation, name=scope.name)
-    _activation_summary(conv1)
+  # kernel = _variable_with_weight_decay('weights',
+  #                                      shape=[5, 5, 3, 64],
+  #                                      stddev=5e-2,
+  #                                      wd=0.0)
+  # conv0 = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
+  #
+  # norm0 = tf.nn.lrn(conv0, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
+  #                   name='norm1')
+  currentfilter = 32
+  kernel = _variable_with_weight_decay('weights',
+                                       shape=[5, 5, 3, currentfilter],  # [filter_height, filter_width, in_channels, out_channels]
+                                       stddev=5e-5,
+                                       wd=0.0)
+  conv0 = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME', name='conv_block1')
 
-  # pool1
-  pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool1')
-  # norm1
-  norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                    name='norm1')
+  # nCycle = 2
+  # lv = 1
+  laststep = conv0
+  laststep = sameWHD(laststep, currentfilter, nCycle=2, lv=1)
+  laststep = modifyWHD(laststep, currentfilter, lv=1)
+  currentfilter = 64
+  laststep = sameWHD(laststep, currentfilter, nCycle=2, lv=2)
+  laststep = modifyWHD(laststep, currentfilter, lv=2)
 
   # conv2
   with tf.variable_scope('conv2') as scope:
     kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 64, 64],
+                                         shape=[5, 5, currentfilter*2, currentfilter*2],
                                          stddev=5e-2,
                                          wd=0.0)
-    conv = tf.nn.conv2d(norm1, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
+    conv = tf.nn.conv2d(laststep, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [currentfilter*2], tf.constant_initializer(0.1))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv2 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv2)
@@ -235,7 +294,7 @@ def inference(images):
                     name='norm2')
   # pool2
   pool2 = tf.nn.max_pool(norm2, ksize=[1, 3, 3, 1],
-                         strides=[1, 2, 2, 1], padding='SAME', name='pool2')
+                         strides=[1, 4, 4, 1], padding='SAME', name='pool2')
 
   # local3
   with tf.variable_scope('local3') as scope:
