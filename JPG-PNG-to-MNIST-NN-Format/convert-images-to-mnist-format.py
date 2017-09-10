@@ -4,8 +4,11 @@ from array import *
 from random import shuffle
 
 # Load from and save to
-Names = [['./eye-images/training-images','train'], ['./eye-images/test-images','test']]
+# linux
 # Names = [['./eye-images/training-images','train'], ['./eye-images/test-images','test']]
+# Names = [['./eye-images/training-images','train'], ['./eye-images/test-images','test']]
+# window
+Names = [['emotion\\training-images','train'], ['emotion\\test-images','test']]
 
 for name in Names:
 	
@@ -24,9 +27,11 @@ for name in Names:
 	shuffle(FileList) # Usefull for further segmenting the validation set
 
 	for filename in FileList:
+		#for window
+		label = int(filename.split('\\')[2])
 
-		# label = int(filename.split('/')[2])
-		label = int(filename.split('/')[3])#when depth ./org/training-images :3,  ./training-images :2
+		# label = int(filename.split('\\')[2])
+		# label = int(filename.split('/')[3])#when depth ./org/training-images :3,  ./training-images :2
 
 		Im = Image.open(filename)
 
