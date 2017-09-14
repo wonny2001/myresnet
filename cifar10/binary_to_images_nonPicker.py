@@ -5,6 +5,7 @@ make_cifar10.py: Create training data from raw CIFAR-10 batches.
 import cPickle as pkl
 import glob
 import os, errno
+from array import *
 
 import numpy as np
 from skimage.io import imsave
@@ -13,16 +14,30 @@ BINARY_DIR = "PNG-2-CIFAR10"
 PIXELS_DIR = "pixel_data2"
 LABEL_FILE = "labels.txt"
 
+# data = array('B')
+
+def pickle_data(data, filename, mode='wb'):
+    with open(filename, mode) as pkfile:
+         pkl.dump(data, pkfile)
+
 
 def unpack_file(fname):
     """
         Unpacks a CIFAR-10 file.
     """
+    # with open(fname) as fileobj:
+    #     for line in fileobj:
+    #         for ch in line:
+    #             print ch
 
-    with open(fname, "r") as f:
-        result = pkl.load(f)
+    file = open(fname, "r")
+    # d = file.readline()
+    # data.readline
+    #
+    # # with open(fname, "r") as f:
+    # #     result = pkl.load(f)
 
-    return result
+    return file
 
 
 def save_as_image(img_flat, fname):
@@ -52,16 +67,17 @@ def main():
     labels = {}
 
     # use "data_batch_*" for just the training set
-    for fname in glob.glob(BINARY_DIR + "/" + "*ready_pickle*"):
+    for fname in glob.glob(BINARY_DIR + "/" + "*ready*"):
         data = unpack_file(fname)
 
         for i in range(10000):
             # img_flat = data["data"][i]
             # fname = data["filenames"][i]
             # label = data["labels"][i]
-            img_flat = data["data"][i]
+            img_flat = data["pixel"][i]
             fname = data["filenames"][i]
-            label = data["labels"][i]
+            label = data["emotion"][i]
+
             # save the image and store the label
             save_as_image(img_flat, fname)
             labels[fname] = label
